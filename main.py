@@ -2,6 +2,7 @@ import tkinter as tk
 from interfaz import InterfazProgramacionLineal
 from metodografico import MetodoGrafico
 from metodosimplex_manual import MetodoSimplexManual  # Usamos la versión manual
+from metodo_dosfases import MetodoDosFases
 
 def main():
     """
@@ -21,6 +22,8 @@ def main():
         elif metodo_seleccionado == "Simplex":
             # ¡Importante! Aquí usamos la clase que implementa el algoritmo manualmente.
             solver = MetodoSimplexManual()
+        elif metodo_seleccionado == "Dos Fases":
+            solver = MetodoDosFases()
         else:
             # Manejo de error por si se añade un método no implementado
             return {
