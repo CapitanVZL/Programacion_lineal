@@ -73,7 +73,7 @@ class InterfazProgramacionLineal:
 
         ttk.Label(controls_frame, text="Método:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.combo_metodo = ttk.Combobox(controls_frame, textvariable=self.metodo_resolucion_var,
-                                         values=["Gráfico", "Simplex", "Dos Fases"], state="readonly", width=10)
+                                         values=["Gráfico", "Simplex"], state="readonly", width=10)
         self.combo_metodo.grid(row=0, column=1, padx=5, pady=5)
         self.combo_metodo.bind("<<ComboboxSelected>>", self.actualizar_variables_metodo)
 
@@ -280,16 +280,11 @@ class InterfazProgramacionLineal:
 
     def mostrar_resultados(self, resultado):
         self.limpiar_resultados()
-        if not resultado:
-            return
-        
-        # Método Gráfico -> Mostrar gráfico
-        if resultado.get('metodo') == "Gráfico":
-            self.mostrar_resultados_grafico(resultado)
-        
-        # Simplex o Dos Fases -> Mostrar solo texto
-        else:
+        if not resultado: return
+        if resultado.get('metodo') == 'Simplex':
             self.mostrar_resultados_simplex(resultado)
+        else:
+            self.mostrar_resultados_grafico(resultado)
 
     def mostrar_resultados_simplex(self, resultado):
         text_frame = ttk.Frame(self.frame_resultados)
