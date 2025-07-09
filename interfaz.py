@@ -73,7 +73,7 @@ class InterfazProgramacionLineal:
 
         ttk.Label(controls_frame, text="Método:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.combo_metodo = ttk.Combobox(controls_frame, textvariable=self.metodo_resolucion_var,
-                                         values=["Gráfico", "Simplex"], state="readonly", width=10)
+                                         values=["Gráfico", "Simplex", "Dos Fases"], state="readonly", width=10)
         self.combo_metodo.grid(row=0, column=1, padx=5, pady=5)
         self.combo_metodo.bind("<<ComboboxSelected>>", self.actualizar_variables_metodo)
 

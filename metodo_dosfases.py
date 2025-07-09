@@ -1,287 +1,190 @@
 import numpy as np
+import tkinter as tk
+from tkinter import ttk
+
 
 class MetodoDosFases:
     def __init__(self):
-        self.tableau = None
-        self.c = None
-        self.artificiales = []
-        self.fase = 1
         self.historial = []
-        self.num_variables = 0
-        self.num_restricciones = 0
-        self.nombres_columnas = []
 
     def resolver(self, datos_problema):
         self.historial = []
-        self.c = np.array(datos_problema['funcion_objetivo'])
-        A = np.array([r['coeficientes'] for r in datos_problema['restricciones']])
-        b = np.array([r['rhs'] for r in datos_problema['restricciones']])
-        signos = [r['signo'] for r in datos_problema['restricciones']]
-        self.num_variables = len(self.c)
-        self.num_restricciones = len(b)
+        texto_total = ""
 
-        # Inicializar nombres de columnas
-        self._inicializar_nombres_columnas(signos)
+        restricciones = datos_problema['restricciones']
+        fo_original = datos_problema['funcion_objetivo'][:]
+        num_vars = len(fo_original)
+        tipo = datos_problema['tipo_optimizacion']
 
-        # --- Fase 1 ---
-        self.historial.append({
-            "descripcion": "=== FASE 1: Minimizar suma de variables artificiales ===",
-            "tableau": None,
-            "nombres_columnas": self.nombres_columnas
-        })
-        
-        self._inicializar_fase1(A, b, signos)
-        
-        self.historial.append({
-            "descripcion": "Tableau inicial Fase 1:",
-            "tableau": self.tableau.copy(),
-            "nombres_columnas": self.nombres_columnas
-        })
+        A = []
+        b = []
+        signos = []
+        for r in restricciones:
+            A.append(r['coeficientes'])
+            b.append(r['rhs'])
+            signos.append(r['signo'])
 
-        if not self._ejecutar_simplex(fase=1):
-            return {
-                "solucion_optima": False,
-                "mensaje": "Problema no factible (Fase 1 no alcanzó Z=0).",
-                "historial_iteraciones": self.historial,
-                "metodo": "Dos Fases"
-            }
+        A = np.array(A, dtype=float)
+        b = np.array(b, dtype=float)
 
-        # --- Fase 2 ---
-        self.historial.append({
-            "descripcion": "\n=== FASE 2: Optimizar función objetivo original ===",
-            "tableau": None,
-            "nombres_columnas": [col for i, col in enumerate(self.nombres_columnas) 
-                                if i not in self.artificiales]
-        })
-        
-        self._inicializar_fase2()
-        
-        self.historial.append({
-            "descripcion": "Tableau inicial Fase 2:",
-            "tableau": self.tableau.copy(),
-            "nombres_columnas": [col for i, col in enumerate(self.nombres_columnas) 
-                                if i not in self.artificiales]
-        })
+        m, n = A.shape
+        identidad = np.eye(m)
+        columnas = []
+        artificiales = []
+        base = []
+        col_index = n
 
-        if not self._ejecutar_simplex(fase=2):
-            return {
-                "solucion_optima": False,
-                "mensaje": "Problema no acotado.",
-                "historial_iteraciones": self.historial,
-                "metodo": "Dos Fases"
-            }
+        var_map = []  # Guarda nombres de columnas
+        for i in range(n):
+            var_map.append(f"X{i+1}")
 
-        return self._generar_resultado_final()
+        for i, signo in enumerate(signos):
+            if signo == '<=':
+                columnas.append(identidad[i])
+                var_map.append(f"S{i+1}")
+                base.append(f"S{i+1}")
+                col_index += 1
+            elif signo == '>=':
+                columnas.append(-identidad[i])
+                var_map.append(f"E{i+1}")
+                columnas.append(identidad[i])
+                var_map.append(f"A{i+1}")
+                artificiales.append(len(var_map) - 1)
+                base.append(f"A{i+1}")
+                col_index += 2
+            elif signo == '=':
+                columnas.append(identidad[i])
+                var_map.append(f"A{i+1}")
+                artificiales.append(len(var_map) - 1)
+                base.append(f"A{i+1}")
+                col_index += 1
 
-    def _inicializar_nombres_columnas(self, signos):
-        """Genera nombres de columnas: X1, X2, S1 (holgura), E1 (exceso), A1 (artificial)"""
-        self.nombres_columnas = ["Z"] + [f"X{i+1}" for i in range(self.num_variables)]
-        
-        # Variables de holgura/exceso/artificiales
-        contador_holgura = 1
-        contador_artificial = 1
-        for s in signos:
-            if s == "<=":
-                self.nombres_columnas.append(f"S{contador_holgura}")
-                contador_holgura += 1
-            elif s == ">=":
-                self.nombres_columnas.append(f"E{contador_holgura}")  # Exceso
-                self.nombres_columnas.append(f"A{contador_artificial}")  # Artificial
-                contador_holgura += 1
-                contador_artificial += 1
-            elif s == "=":
-                self.nombres_columnas.append(f"A{contador_artificial}")
-                contador_artificial += 1
-                
-        self.nombres_columnas.append("RHS")
+        if columnas:
+            extras = np.column_stack(columnas)
+            A_std = np.hstack((A, extras))
+        else:
+            A_std = A.copy()
 
-    def _inicializar_fase1(self, A, b, signos):
-        num_artificiales = sum(1 for s in signos if s in (">=", "="))
-        total_columnas = 1 + self.num_variables + self.num_restricciones + num_artificiales + 1
-        self.tableau = np.zeros((self.num_restricciones + 1, total_columnas))
-        
-        # Configurar fila Z de Fase 1 (minimizar suma de artificiales)
-        self.tableau[0, 0] = 1  # Z
-        
-        # Variables artificiales (columnas)
-        self.artificiales = []
-        col_artificial = 1 + self.num_variables + self.num_restricciones
-        
-        # Llenar restricciones
-        for i in range(self.num_restricciones):
-            # Coeficientes de variables originales
-            self.tableau[i+1, 1:1+self.num_variables] = A[i]
-            
-            # Variables de holgura/exceso
-            col_s = 1 + self.num_variables + i
-            if signos[i] == "<=":
-                self.tableau[i+1, col_s] = 1  # Holgura
-            elif signos[i] == ">=":
-                self.tableau[i+1, col_s] = -1  # Exceso
-                # Variable artificial
-                self.tableau[i+1, col_artificial] = 1
-                self.artificiales.append(col_artificial)
-                col_artificial += 1
-            elif signos[i] == "=":
-                # Variable artificial
-                self.tableau[i+1, col_artificial] = 1
-                self.artificiales.append(col_artificial)
-                col_artificial += 1
-            
-            # Lado derecho
-            self.tableau[i+1, -1] = b[i]
-        
-        # Configurar función objetivo de Fase 1 (coeficientes 1 para artificiales)
-        for col in self.artificiales:
-            self.tableau[0, col] = 1
-        
-        # Restar filas de artificiales de la fila Z para tener costos reducidos 0
-        for col in self.artificiales:
-            for row in range(1, self.num_restricciones + 1):
-                if self.tableau[row, col] == 1:
-                    self.tableau[0, :] -= self.tableau[row, :]
-                    break
+        num_total_vars = A_std.shape[1]
 
-    def _inicializar_fase2(self):
-        # Eliminar columnas de variables artificiales
-        columnas_a_mantener = [col for col in range(self.tableau.shape[1]) if col not in self.artificiales]
-        self.tableau = self.tableau[:, columnas_a_mantener]
-        
-        # Restaurar función objetivo original
-        self.tableau[0, 0] = 1  # Z
-        self.tableau[0, 1:1+self.num_variables] = -self.c  # Negativo porque es maximización
-        
-        # Asegurar costo reducido cero para variables básicas
-        for col in range(1, self.tableau.shape[1]):
-            if np.sum(self.tableau[1:, col]) == 1 and np.count_nonzero(self.tableau[1:, col]) == 1:
-                row = np.where(self.tableau[1:, col] == 1)[0][0] + 1
-                self.tableau[0, :] -= self.tableau[0, col] * self.tableau[row, :]
+        c_f1 = np.zeros(num_total_vars)
+        for idx in artificiales:
+            c_f1[idx] = 1
 
-    def _ejecutar_simplex(self, fase):
+        Z = np.zeros(num_total_vars)
+        for idx in artificiales:
+            row_idx = base.index(var_map[idx])
+            Z += A_std[row_idx]
+        Z = -Z
+
+        tableau = np.vstack([Z, A_std])
+        tableau = np.hstack([tableau, np.vstack([[0], b.reshape(-1, 1)])])
+
+        texto_total += "--- FASE 1 ---\n\n"
         iteracion = 1
-        while True:
-            if self._condicion_de_parada(fase):
-                break
+        while any(val < 0 for val in tableau[0, :-1]):
+            texto_total += f"--- ITERACIÓN {iteracion} ---\n"
+            texto_total += self.formatear_tableau(var_map, base, tableau) + "\n\n"
 
-            col_pivote = self._encontrar_columna_pivote(fase)
-            fila_pivote = self._encontrar_fila_pivote(col_pivote)
-            
-            if fila_pivote == -1:
-                self.historial.append({
-                    "descripcion": f"Fase {fase} - Iteración {iteracion}:\nSolución no acotada.",
-                    "tableau": self.tableau.copy(),
-                    "nombres_columnas": self.nombres_columnas if fase == 1 else 
-                                       [col for i, col in enumerate(self.nombres_columnas) 
-                                        if i not in self.artificiales]
-                })
-                return False
+            col_pivote = np.argmin(tableau[0, :-1])
+            razones = []
+            for i in range(1, tableau.shape[0]):
+                if tableau[i, col_pivote] > 0:
+                    razones.append(tableau[i, -1] / tableau[i, col_pivote])
+                else:
+                    razones.append(np.inf)
+            fila_pivote = np.argmin(razones) + 1
 
-            # Nombre de la variable que sale
-            if fase == 1:
-                var_sale = f"S{fila_pivote}" if fila_pivote <= self.num_restricciones else f"R{fila_pivote}"
-            else:
-                col_basica = np.where(self.tableau[fila_pivote, 1:-1] == 1)[0][0] + 1
-                var_sale = self.nombres_columnas[col_basica]
+            pivote = tableau[fila_pivote, col_pivote]
+            tableau[fila_pivote] = tableau[fila_pivote] / pivote
+            for i in range(tableau.shape[0]):
+                if i != fila_pivote:
+                    tableau[i] -= tableau[i, col_pivote] * tableau[fila_pivote]
 
-            self.historial.append({
-                "descripcion": f"Fase {fase} - Iteración {iteracion}:\n"
-                              f"Variable entra: {self.nombres_columnas[col_pivote]}\n"
-                              f"Variable sale: {var_sale}\n"
-                              f"Elemento pivote: {self.tableau[fila_pivote, col_pivote]:.4f}",
-                "tableau": self.tableau.copy(),
-                "nombres_columnas": self.nombres_columnas if fase == 1 else 
-                                   [col for i, col in enumerate(self.nombres_columnas) 
-                                    if i not in self.artificiales]
-            })
-
-            self._realizar_pivote(fila_pivote, col_pivote)
+            base[fila_pivote - 1] = var_map[col_pivote]
             iteracion += 1
-            
-            # Límite de seguridad
-            if iteracion > 100:
-                self.historial.append({
-                    "descripcion": f"Fase {fase} - Iteración {iteracion}:\n"
-                                  "Se detuvo por alcanzar el límite de iteraciones.",
-                    "tableau": self.tableau.copy(),
-                    "nombres_columnas": self.nombres_columnas if fase == 1 else 
-                                       [col for i, col in enumerate(self.nombres_columnas) 
-                                        if i not in self.artificiales]
-                })
-                return False
 
-        return True
+        texto_total += f"--- ITERACIÓN {iteracion} (FINAL FASE 1) ---\n"
+        texto_total += self.formatear_tableau(var_map, base, tableau) + "\n\n"
 
-    def _condicion_de_parada(self, fase):
-        return np.all(self.tableau[0, 1:-1] >= -1e-6)
+        texto_total += "--- FASE 2 ---\n\n"
+        fo_completa = np.zeros(num_total_vars)
+        fo_completa[:num_vars] = -np.array(fo_original)
 
-    def _encontrar_columna_pivote(self, fase):
-        return np.argmin(self.tableau[0, 1:-1]) + 1
+        for i, var in enumerate(base):
+            if var in var_map[:num_vars]:
+                fo_completa += tableau[i+1, :-1] * fo_completa[var_map.index(var)]
 
-    def _encontrar_fila_pivote(self, col_pivote):
-        columna = self.tableau[1:, col_pivote]
-        rhs = self.tableau[1:, -1]
-        ratios = np.full_like(rhs, np.inf)
-        np.divide(rhs, columna, out=ratios, where=columna > 1e-6)
-        if np.all(np.isinf(ratios)):
-            return -1
-        return np.argmin(ratios) + 1
+        tableau[0, :-1] = fo_completa
+        tableau[0, -1] = 0
+        for i in range(1, tableau.shape[0]):
+            if base[i - 1] in var_map[:num_vars]:
+                tableau[0, -1] += tableau[i, -1] * fo_completa[var_map.index(base[i - 1])]
 
-    def _realizar_pivote(self, fila_pivote, col_pivote):
-        pivote = self.tableau[fila_pivote, col_pivote]
-        self.tableau[fila_pivote, :] /= pivote
-        for i in range(self.tableau.shape[0]):
-            if i != fila_pivote:
-                factor = self.tableau[i, col_pivote]
-                self.tableau[i, :] -= factor * self.tableau[fila_pivote, :]
+        iteracion = 1
+        while any(val < 0 for val in tableau[0, :-1]):
+            texto_total += f"--- ITERACIÓN {iteracion} ---\n"
+            texto_total += self.formatear_tableau(var_map, base, tableau) + "\n\n"
 
-    def _generar_resultado_final(self):
-        solucion = {}
-        for i in range(self.num_variables):
-            col = i + 1
-            columna = self.tableau[:, col]
-            if np.sum(columna) == 1 and np.count_nonzero(columna) == 1:
-                fila = np.where(columna == 1)[0][0] + 1
-                solucion[f"X{i + 1}"] = self.tableau[fila, -1]
-            else:
-                solucion[f"X{i + 1}"] = 0.0
+            col_pivote = np.argmin(tableau[0, :-1])
+            razones = []
+            for i in range(1, tableau.shape[0]):
+                if tableau[i, col_pivote] > 0:
+                    razones.append(tableau[i, -1] / tableau[i, col_pivote])
+                else:
+                    razones.append(np.inf)
+            fila_pivote = np.argmin(razones) + 1
 
-        self.historial.append({
-            "descripcion": "=== SOLUCIÓN ÓPTIMA ENCONTRADA ===",
-            "tableau": None,
-            "nombres_columnas": [col for i, col in enumerate(self.nombres_columnas) 
-                                if i not in self.artificiales]
-        })
+            pivote = tableau[fila_pivote, col_pivote]
+            tableau[fila_pivote] = tableau[fila_pivote] / pivote
+            for i in range(tableau.shape[0]):
+                if i != fila_pivote:
+                    tableau[i] -= tableau[i, col_pivote] * tableau[fila_pivote]
+
+            base[fila_pivote - 1] = var_map[col_pivote]
+            iteracion += 1
+
+        texto_total += f"--- ITERACIÓN {iteracion} (FINAL FASE 2) ---\n"
+        texto_total += self.formatear_tableau(var_map, base, tableau) + "\n\n"
+
+        texto_total += "--- SOLUCIÓN FINAL ---\n"
+        texto_total += f"Valor óptimo de Z: {tableau[0, -1]:.4f}\n"
+        for i, var in enumerate(base):
+            texto_total += f"{var} = {tableau[i+1, -1]:.4f}\n"
+
+        self.mostrar_resultados_en_ventana(texto_total)
 
         return {
-            "solucion_optima": True,
-            "valor_optimo": self.tableau[0, -1],
-            "variables": solucion,
-            "mensaje": "Solución óptima encontrada con Método de Dos Fases.",
-            "historial_iteraciones": self.historial,
-            "metodo": "Dos Fases"
+            'metodo': 'Dos Fases',
+            'valor_optimo': tableau[0, -1],
+            'variables': {var: tableau[i+1, -1] for i, var in enumerate(base)}
         }
 
-    def _formatear_tableau(self, tableau, nombres_columnas):
-        """Formatea el tableau como texto para mostrar en la interfaz"""
-        headers = ["Base"] + nombres_columnas
-        ancho_col = max(10, max(len(h) for h in headers) + 2)
-        
-        # Construir filas
-        filas = []
-        fila_z = ["Z"] + [f"{val:.4f}" for val in tableau[0, :]]
-        filas.append(fila_z)
-        
-        for i in range(1, tableau.shape[0]):
-            # Encontrar variable básica
-            col_basica = np.where(tableau[i, 1:-1] == 1)[0]
-            nombre_fila = nombres_columnas[col_basica[0]+1] if len(col_basica) > 0 else f"R{i}"
-            fila = [nombre_fila] + [f"{val:.4f}" for val in tableau[i, :]]
-            filas.append(fila)
-        
-        # Alinear texto
-        tabla_str = "  ".join(h.ljust(ancho_col) for h in headers) + "\n"
-        tabla_str += "-" * (len(headers) * ancho_col) + "\n"
-        for fila in filas:
-            tabla_str += "  ".join(val.ljust(ancho_col) for val in fila) + "\n"
-        
-        return tabla_str
+    def formatear_tableau(self, nombre_variables, base, tableau):
+        headers = ["Base", "Z"] + nombre_variables + ["RHS"]
+        filas_str = ["".join(f"{h:<9}" for h in headers), "-" * len(headers) * 9]
+        for i, fila in enumerate(tableau):
+            base_name = base[i - 1] if i > 0 else "Z"
+            fila_str = f"{base_name:<9}" + "".join(f"{val:<9.2f}" for val in fila)
+            filas_str.append(fila_str)
+        return "\n".join(filas_str)
+
+    def mostrar_resultados_en_ventana(self, texto):
+        ventana = tk.Toplevel()
+        ventana.title("Resultado Método Dos Fases")
+        ventana.geometry("950x600")
+        ventana.configure(bg="#1e1e1e")
+
+        label = tk.Label(ventana, text="=== ANÁLISIS MÉTODO DOS FASES ===", fg="#3a86ff",
+                         bg="#1e1e1e", font=("Segoe UI", 12, "bold"))
+        label.pack(pady=10)
+
+        text_widget = tk.Text(ventana, wrap="none", font=("Consolas", 10), bg="#161616", fg="#f8f9fa")
+        text_widget.pack(expand=True, fill="both", padx=10, pady=10)
+
+        text_widget.insert("end", texto)
+        text_widget.config(state="disabled")
+
+        y_scroll = ttk.Scrollbar(ventana, orient="vertical", command=text_widget.yview)
+        y_scroll.pack(side="right", fill="y")
+        text_widget.config(yscrollcommand=y_scroll.set)
