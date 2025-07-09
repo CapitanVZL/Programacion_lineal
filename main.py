@@ -1,24 +1,25 @@
+# main.py
+
 import tkinter as tk
 from interfaz import InterfazProgramacionLineal
 from metodografico import MetodoGrafico
+<<<<<<< HEAD
 from metodosimplex_manual import MetodoSimplexManual
+=======
+# Renombramos MetodoSimplexManual a MetodoSimplexSimple para claridad
+from metodosimplex_manual import MetodoSimplexManual as MetodoSimplexSimple
+>>>>>>> de4ad02f41533ad16be5769eff8628917ca87852
 from metodo_dosfases import MetodoDosFases
 
 def main():
-    """
-    Función principal que inicia la aplicación.
-    """
     root = tk.Tk()
 
     def calcular_callback(datos_problema):
-        """
-        Esta función se pasa a la interfaz y actúa como un "router".
-        Decide qué clase de solucionador usar basado en la selección del usuario.
-        """
-        metodo_seleccionado = datos_problema.get('metodo')
+        metodo = datos_problema.get('metodo')
 
-        if metodo_seleccionado == "Gráfico":
+        if metodo == "Gráfico":
             solver = MetodoGrafico()
+<<<<<<< HEAD
         elif metodo_seleccionado == "Simplex":
             solver = MetodoSimplexManual()
         elif metodo_seleccionado == "Dos Fases":
@@ -29,11 +30,25 @@ def main():
                 "mensaje": f'Método "{metodo_seleccionado}" no reconocido.',
                 "historial_iteraciones": []
             }
+=======
+        elif metodo == "Simplex":
+            # El Simplex simple solo funciona para <=
+            if any(r['signo'] != '<=' for r in datos_problema['restricciones']):
+                # Si hay >= o =, automáticamente usamos Dos Fases
+                solver = MetodoDosFases()
+            else:
+                solver = MetodoSimplexSimple()
+        elif metodo == "Dos Fases":
+            solver = MetodoDosFases()
+        else:
+            return {"solucion_optima": False, "mensaje": "Método no reconocido."}
+>>>>>>> de4ad02f41533ad16be5769eff8628917ca87852
 
         resultado = solver.resolver(datos_problema)
         resultado["metodo"] = metodo_seleccionado  # Asegurarse que esté incluido
         return resultado
 
+<<<<<<< HEAD
     def post_wrap_calcular(datos):
         resultado = calcular_callback(datos)
         post_procesar_resultado(resultado)
@@ -72,6 +87,9 @@ def main():
     app = InterfazProgramacionLineal(root, post_wrap_calcular)
 
     # Iniciar la aplicación
+=======
+    app = InterfazProgramacionLineal(root, calcular_callback)
+>>>>>>> de4ad02f41533ad16be5769eff8628917ca87852
     root.mainloop()
 
 if __name__ == "__main__":
