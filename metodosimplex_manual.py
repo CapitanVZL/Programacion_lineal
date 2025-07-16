@@ -1,5 +1,3 @@
-# metodosimplex_manual.py
-
 import numpy as np
 
 
