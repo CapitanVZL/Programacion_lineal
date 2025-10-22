@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import numpy as np
 
+# Prueba git
+
 # Colores y Estilos
 DARK_BG = "#1e1e1e"
 DARKER_BG = "#161616"
